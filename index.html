@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#111">
+<title>Studio Nivedita Trace</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <div><div class="eyebrow">STUDIO NIVEDITA</div><h1>TRACE</h1></div>
+  <button id="startBtn" class="primary">Start camera</button>
+</header>
+<main>
+  <section id="setup" class="panel">
+    <h2>1. Choose your reference</h2>
+    <label class="upload"><input id="imageInput" type="file" accept="image/*"><span>＋ Upload reference</span></label>
+    <p class="hint">For best results, use a clean front-facing pet/photo reference.</p>
+  </section>
+  <section id="stage" class="stage hidden">
+    <video id="camera" autoplay playsinline muted></video>
+    <div id="overlayWrap"><img id="reference" alt="Reference"></div>
+    <div class="crosshair"></div>
+    <div class="stageHint" id="stageHint">Drag to position • pinch to resize • twist to rotate</div>
+  </section>
+  <section class="controls panel">
+    <div class="control"><label>Opacity <output id="opacityOut">55%</output></label><input id="opacity" type="range" min="0" max="100" value="55"></div>
+    <div class="control"><label>Scale <output id="scaleOut">100%</output></label><input id="scale" type="range" min="25" max="250" value="100"></div>
+    <div class="control"><label>Rotation <output id="rotationOut">0°</output></label><input id="rotation" type="range" min="-180" max="180" value="0"></div>
+    <div class="buttons"><button id="lockBtn">🔒 Lock</button><button id="gridBtn">▦ Grid</button><button id="flipBtn">↔ Flip</button><button id="resetBtn">↺ Reset</button></div>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>
