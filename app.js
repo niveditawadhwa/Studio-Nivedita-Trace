@@ -1,1 +1,125 @@
-const $=id=>document.getElementById(id);const input=$("imageInput"),img=$("reference"),stage=$("stage"),camera=$("camera"),wrap=$("overlayWrap");let locked=false,x=0,y=0,scale=1,rotation=0,flip=false,pointers=new Map(),startDist=0,startAngle=0,startScale=1,startRotation=0,startX=0,startY=0,startMidX=0,startMidY=0;input.addEventListener("change",e=>{const file=e.target.files?.[0];if(!file)return;img.src=URL.createObjectURL(file);stage.classList.remove("hidden");$("setup").classList.add("hidden")});$("startBtn").onclick=async()=>{try{const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}},audio:false});camera.srcObject=stream;$("startBtn").textContent="Camera on";$("startBtn").disabled=true}catch(err){alert("Camera access was blocked. Open this page over HTTPS and allow Camera in Safari.")}};function apply(){wrap.style.transform=`translate(calc(-50% + ${x}px),calc(-50% + ${y}px)) rotate(${rotation}deg) scale(${scale})`;wrap.style.opacity=$("opacity").value/100;img.style.transform=flip?"scaleX(-1)":"scaleX(1)";$("opacityOut").textContent=$("opacity").value+"%";$("scaleOut").textContent=Math.round(scale*100)+"%";$("rotationOut").textContent=Math.round(rotation)+"°"}$("opacity").oninput=apply;$("scale").oninput=e=>{scale=e.target.value/100;apply()};$("rotation").oninput=e=>{rotation=+e.target.value;apply()};$("lockBtn").onclick=()=>{locked=!locked;$("lockBtn").textContent=locked?"🔓 Unlock":"🔒 Lock"};$("gridBtn").onclick=()=>stage.classList.toggle("grid-on");$("flipBtn").onclick=()=>{flip=!flip;apply()};$("resetBtn").onclick=()=>{x=0;y=0;scale=1;rotation=0;flip=false;$("scale").value=100;$("rotation").value=0;apply()};function dist(a,b){return Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)}function angle(a,b){return Math.atan2(b.clientY-a.clientY,b.clientX-a.clientX)*180/Math.PI}function mid(a,b){return{x:(a.clientX+b.clientX)/2,y:(a.clientY+b.clientY)/2}}wrap.addEventListener("pointerdown",e=>{if(locked)return;wrap.setPointerCapture(e.pointerId);pointers.set(e.pointerId,e);if(pointers.size===1){startX=x;startY=y;startMidX=e.clientX;startMidY=e.clientY}if(pointers.size===2){const[a,b]=[...pointers.values()];startDist=dist(a,b);startAngle=angle(a,b);startScale=scale;startRotation=rotation;const m=mid(a,b);startMidX=m.x;startMidY=m.y;startX=x;startY=y}});wrap.addEventListener("pointermove",e=>{if(locked||!pointers.has(e.pointerId))return;pointers.set(e.pointerId,e);const vals=[...pointers.values()];if(vals.length===1){x=startX+(e.clientX-startMidX);y=startY+(e.clientY-startMidY)}if(vals.length>=2){const[a,b]=vals,m=mid(a,b);scale=Math.max(.25,Math.min(2.5,startScale*dist(a,b)/startDist));rotation=startRotation+(angle(a,b)-startAngle);x=startX+(m.x-startMidX);y=startY+(m.y-startMidY)}$("scale").value=Math.round(scale*100);$("rotation").value=Math.round(rotation);apply()});["pointerup","pointercancel"].forEach(ev=>wrap.addEventListener(ev,e=>pointers.delete(e.pointerId)));if("serviceWorker"in navigator)navigator.serviceWorker.register("sw.js").catch(()=>{});
+const $=id=>document.getElementById(id);
+const video=$("camera"), stage=$("stage"), overlay=$("overlayCanvas"), cal=$("calibrationCanvas");
+const input=$("imageInput"), startBtn=$("startBtn"), lockBtn=$("lockBtn"), unlockBtn=$("unlockBtn");
+const opacity=$("opacity"), opacityOut=$("opacityOut"), statusEl=$("status"), hint=$("stageHint"), lockBadge=$("canvasLock"), tracking=$("trackingStatus");
+let stream=null, reference=null, corners=[], locked=false, trackingOn=false, prevGray=null, prevPts=null, lastTrack=0, animationId=null;
+let refCanvas=document.createElement("canvas"), overlayCtx=overlay.getContext("2d");
+
+input.addEventListener("change",e=>{
+  const f=e.target.files?.[0]; if(!f)return;
+  reference=new Image(); reference.onload=()=>{
+    refCanvas.width=reference.naturalWidth; refCanvas.height=reference.naturalHeight;
+    refCanvas.getContext("2d").drawImage(reference,0,0);
+    $("setup").classList.add("hidden"); stage.classList.remove("hidden");
+    statusEl.textContent="Start the camera, then tap the 4 corners of your canvas.";
+    resizeCanvases();
+  }; reference.src=URL.createObjectURL(f);
+});
+
+startBtn.onclick=async()=>{
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}},audio:false});
+  video.srcObject=stream; await video.play(); resizeCanvases();
+  startBtn.textContent="Camera on"; startBtn.disabled=true;
+  statusEl.textContent="Tap the 4 corners of your physical canvas, clockwise.";
+  hint.textContent="Tap the 4 canvas corners, clockwise";
+  cal.classList.remove("hidden");
+ }catch(e){alert("Camera access was blocked. Allow Camera for this site in Safari.")}
+};
+
+function resizeCanvases(){
+ const r=stage.getBoundingClientRect(), d=Math.min(devicePixelRatio||1,2);
+ [overlay,cal].forEach(c=>{c.width=Math.round(r.width*d);c.height=Math.round(r.height*d);c.style.width=r.width+"px";c.style.height=r.height+"px"});
+ drawCalibration();
+}
+window.addEventListener("resize",()=>{if(!locked)resizeCanvases()});
+
+function videoToStage(p){
+ const vw=video.videoWidth||1280,vh=video.videoHeight||720, sw=stage.clientWidth,sh=stage.clientHeight;
+ const s=Math.max(sw/vw,sh/vh), dw=vw*s,dh=vh*s, ox=(sw-dw)/2,oy=(sh-dh)/2;
+ return {x:p.x*s+ox,y:p.y*s+oy};
+}
+function stageToVideo(p){
+ const vw=video.videoWidth||1280,vh=video.videoHeight||720, sw=stage.clientWidth,sh=stage.clientHeight;
+ const s=Math.max(sw/vw,sh/vh), dw=vw*s,dh=vh*s, ox=(sw-dw)/2,oy=(sh-dh)/2;
+ return {x:(p.x-ox)/s,y:(p.y-oy)/s};
+}
+function drawCalibration(){
+ const ctx=cal.getContext("2d");ctx.clearRect(0,0,cal.width,cal.height);
+ const d=Math.min(devicePixelRatio||1,2);ctx.save();ctx.scale(d,d);
+ corners.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,12,0,Math.PI*2);ctx.fillStyle="#fff";ctx.fill();ctx.strokeStyle="#111";ctx.lineWidth=3;ctx.stroke();ctx.fillStyle="#111";ctx.font="bold 12px sans-serif";ctx.textAlign="center";ctx.textBaseline="middle";ctx.fillText(String(i+1),p.x,p.y)});
+ if(corners.length>1){ctx.beginPath();ctx.moveTo(corners[0].x,corners[0].y);corners.slice(1).forEach(p=>ctx.lineTo(p.x,p.y));if(corners.length===4)ctx.closePath();ctx.strokeStyle="rgba(255,255,255,.9)";ctx.lineWidth=2;ctx.stroke()}
+ ctx.restore();
+}
+
+cal.addEventListener("pointerdown",e=>{
+ if(locked||!reference||!stream)return;
+ if(corners.length>=4)return;
+ const r=cal.getBoundingClientRect(); corners.push({x:e.clientX-r.left,y:e.clientY-r.top}); drawCalibration();
+ if(corners.length===4){lockBtn.disabled=false;statusEl.textContent="Canvas calibrated. Tap Lock canvas.";hint.textContent="4 corners set — tap Lock canvas"}
+});
+
+opacity.oninput=()=>{opacityOut.textContent=opacity.value+"%"};
+
+lockBtn.onclick=()=>{
+ if(corners.length!==4)return;
+ locked=true; lockBtn.classList.add("hidden");unlockBtn.classList.remove("hidden");cal.classList.add("hidden");lockBadge.classList.remove("hidden");tracking.classList.remove("hidden");statusEl.textContent="Canvas locked. Move the phone closer or around the canvas — the reference will try to stay registered.";hint.textContent="Move slowly. The canvas is locked.";
+ startTracking();
+};
+unlockBtn.onclick=()=>{locked=false;trackingOn=false;unlockBtn.classList.add("hidden");lockBtn.classList.remove("hidden");lockBadge.classList.add("hidden");tracking.classList.add("hidden");prevGray?.delete?.();prevPts?.delete?.();prevGray=null;prevPts=null;statusEl.textContent="Canvas unlocked. Recalibrate if you need to change the canvas.";hint.textContent="Tap the 4 canvas corners, clockwise";corners=[];drawCalibration();clearOverlay()};
+$("resetBtn").onclick=()=>{locked=false;trackingOn=false;corners=[];lockBtn.disabled=true;unlockBtn.classList.add("hidden");lockBtn.classList.remove("hidden");lockBadge.classList.add("hidden");tracking.classList.add("hidden");prevGray?.delete?.();prevPts?.delete?.();prevGray=null;prevPts=null;clearOverlay();drawCalibration();statusEl.textContent="Reset. Start again by tapping the 4 canvas corners."};
+$("gridBtn").onclick=()=>{stage.classList.toggle("grid-on")};
+
+function clearOverlay(){overlayCtx.clearRect(0,0,overlay.width,overlay.height)}
+function makeSourceMat(){
+ const max=900,s=Math.min(1,max/refCanvas.width,max/refCanvas.height), w=Math.max(1,Math.round(refCanvas.width*s)),h=Math.max(1,Math.round(refCanvas.height*s));
+ const c=document.createElement("canvas");c.width=w;c.height=h;c.getContext("2d").drawImage(refCanvas,0,0,w,h);return cv.imread(c);
+}
+function getDst(){return corners.map(p=>stageToVideo(p))}
+
+function startTracking(){
+ if(!window.cv||!cv.Mat){
+   statusEl.textContent="OpenCV is still loading. Keep this screen open for a moment, then lock again.";trackingOn=false;return;
+ }
+ trackingOn=true; prevGray?.delete?.();prevPts?.delete?.(); prevGray=new cv.Mat(); prevPts=new cv.Mat();
+ const src=new cv.Mat(video.videoHeight,video.videoWidth,cv.CV_8UC4); cv.VideoCapture(video).read(src); cv.cvtColor(src,prevGray,cv.COLOR_RGBA2GRAY);
+ const arr=getDst(); prevPts=cv.matFromArray(4,1,cv.CV_32FC2,arr.flatMap(p=>[p.x,p.y])); src.delete();
+ if(animationId)cancelAnimationFrame(animationId); animationId=requestAnimationFrame(trackLoop);
+}
+function trackLoop(t){
+ if(!trackingOn||!locked)return;
+ if(t-lastTrack<80){animationId=requestAnimationFrame(trackLoop);return} lastTrack=t;
+ try{
+  const cap=new cv.VideoCapture(video), frame=new cv.Mat(video.videoHeight,video.videoWidth,cv.CV_8UC4), gray=new cv.Mat();cap.read(frame);cv.cvtColor(frame,gray,cv.COLOR_RGBA2GRAY);
+  if(prevGray&&prevPts&&prevPts.rows===4){
+   const next=new cv.Mat(),status=new cv.Mat(),err=new cv.Mat();
+   cv.calcOpticalFlowPyrLK(prevGray,gray,prevPts,next,status,err,new cv.Size(21,21),3,new cv.TermCriteria(cv.TERM_CRITERIA_EPS|cv.TERM_CRITERIA_COUNT,30,0.01));
+   let good=0;const pts=[];
+   for(let i=0;i<4;i++){if(status.data[i]){pts.push({x:next.data32F[i*2],y:next.data32F[i*2+1]});good++}else pts.push(getDst()[i])}
+   if(good>=3){const newCorners=pts.map(videoPointToStage);corners=newCorners;drawOverlay(frame,newCorners);prevPts.delete();prevPts=next.clone();tracking.textContent=good===4?"● Tracking":"● Tracking (partial)";}
+   else {tracking.textContent="⚠ Tracking weak — hold phone steady";drawOverlay(frame,corners)}
+   next.delete();status.delete();err.delete();
+  }
+  gray.copyTo(prevGray);frame.delete();gray.delete();
+ }catch(e){tracking.textContent="⚠ Tracking unavailable"}
+ animationId=requestAnimationFrame(trackLoop);
+}
+function videoPointToStage(p){return videoToStage(p)}
+
+function drawOverlay(frame,stageCorners){
+ clearOverlay();
+ if(!reference||stageCorners.length!==4)return;
+ // Draw the reference into a source Mat, then perspective-warp it to the physical canvas quadrilateral.
+ const src=makeSourceMat();
+ const srcPts=cv.matFromArray(4,1,cv.CV_32FC2,[0,0,src.cols,0,src.cols,src.rows,0,src.rows]);
+ const d=stageCorners.map(stageToVideo);const dstPts=cv.matFromArray(4,1,cv.CV_32FC2,d.flatMap(p=>[p.x,p.y]));
+ const H=cv.getPerspectiveTransform(srcPts,dstPts);
+ const warped=new cv.Mat();cv.warpPerspective(src,warped,H,new cv.Size(frame.cols,frame.rows),cv.INTER_LINEAR,cv.BORDER_CONSTANT,new cv.Scalar(0,0,0,0));
+ // Put alpha on the warped reference.
+ const channels=new cv.MatVector();cv.split(warped,channels);if(channels.size()===4)channels.get(3).setTo(new cv.Scalar(Math.round(Number(opacity.value)*2.55)));cv.merge(channels,warped);
+ cv.imshow(overlay,warped);
+ src.delete();srcPts.delete();dstPts.delete();H.delete();warped.delete();channels.delete();
+}
+
+// Initial render once the reference/canvas is calibrated.
+setInterval(()=>{if(locked&&trackingOn===false&&window.cv&&cv.Mat){}},500);
