@@ -17,21 +17,28 @@
   <section id="setup" class="panel">
     <h2>1. Choose your reference</h2>
     <label class="upload"><input id="imageInput" type="file" accept="image/*"><span>＋ Upload reference</span></label>
-    <p class="hint">For best results, use a clean front-facing pet/photo reference.</p>
+    <p class="hint">Then put the phone over the whole canvas. We’ll lock the artwork to the physical canvas.</p>
   </section>
   <section id="stage" class="stage hidden">
     <video id="camera" autoplay playsinline muted></video>
-    <div id="overlayWrap"><img id="reference" alt="Reference"></div>
-    <div class="crosshair"></div>
-    <div class="stageHint" id="stageHint">Drag to position • pinch to resize • twist to rotate</div>
+    <canvas id="overlayCanvas"></canvas>
+    <canvas id="calibrationCanvas"></canvas>
+    <div id="canvasLock" class="canvas-lock hidden">🔒 CANVAS LOCKED</div>
+    <div id="trackingStatus" class="tracking-status hidden">Tracking canvas…</div>
+    <div class="stageHint" id="stageHint">Tap the 4 canvas corners, clockwise</div>
   </section>
   <section class="controls panel">
-    <div class="control"><label>Opacity <output id="opacityOut">55%</output></label><input id="opacity" type="range" min="0" max="100" value="55"></div>
-    <div class="control"><label>Scale <output id="scaleOut">100%</output></label><input id="scale" type="range" min="25" max="250" value="100"></div>
-    <div class="control"><label>Rotation <output id="rotationOut">0°</output></label><input id="rotation" type="range" min="-180" max="180" value="0"></div>
-    <div class="buttons"><button id="lockBtn">🔒 Lock</button><button id="gridBtn">▦ Grid</button><button id="flipBtn">↔ Flip</button><button id="resetBtn">↺ Reset</button></div>
+    <div class="control"><label>Reference opacity <output id="opacityOut">55%</output></label><input id="opacity" type="range" min="0" max="100" value="55"></div>
+    <div class="buttons">
+      <button id="lockBtn" disabled>📐 Lock canvas</button>
+      <button id="unlockBtn" class="hidden">🔓 Unlock</button>
+      <button id="gridBtn">▦ Grid</button>
+      <button id="resetBtn">↺ Reset</button>
+    </div>
+    <p id="status" class="status">Upload a reference, start the camera, then calibrate the canvas.</p>
   </section>
 </main>
+<script async src="https://docs.opencv.org/4.x/opencv.js" onload="window.openCvLoaded=true"></script>
 <script src="app.js"></script>
 </body>
 </html>
